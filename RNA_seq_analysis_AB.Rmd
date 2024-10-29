@@ -1,0 +1,510 @@
+---
+title: "RNAseq_analysis_Julies_data"
+author: "Asude Berber"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r knitr_setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE,
+  out.width = 800)
+```
+
+```{r}
+#Download packages
+
+if (!requireNamespace("DESeq2", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("ggpubr", force = TRUE)
+
+install.packages("ashr")
+
+install.packages("devtools")
+devtools::install_github("stephenturner/annotables")
+
+install.packages("ggmaplot", force = TRUE)
+```
+
+
+```{r}
+#Libraries
+library(DESeq2)
+library(dplyr)
+library(tidyr)
+library(apeglm)
+library(ggplot2)
+library(RColorBrewer)
+library(pheatmap)
+library(ggrepel)
+library(clusterProfiler)
+library(DEGreport)
+library(org.Hs.eg.db)
+library(DOSE)
+library(tidyverse)
+library(EnsDb.Hsapiens.v86)
+library(ensembldb)
+library(RColorBrewer)
+library(biomaRt)
+library(annotables)
+library(AnnotationDbi)
+library(ashr)
+library(ggpubr)
+library(ggmatplot)
+```
+
+```{r}
+#data import
+setwd("C:/Users/ABER0237/Documents/Projects_Asude_CFAS/260924_Julie_RNAseq_analysis")
+list.files()
+data_work_dds <- readRDS("C:/Users/ABER0237/Documents/Projects_Asude_CFAS/260924_Julie_RNAseq_analysis/julie_TNXB_KD_Ensembl110_dds.rds")
+resultsNames(data_work_dds)
+
+#design formula= ~ donor + condition
+```
+#Generate differential expression results for the following combinations:
+#condition_diff_KD_vs_conf100_control = 1
+#condition_conf100_KD_vs_conf100_control = 2
+
+```{r}
+#differential gene expression analysis
+res <- results(data_work_dds)
+data_work_dds <- DESeq(data_work_dds)
+summary(data_work_dds)
+summary(res)
+```
+
+
+
+```{r}
+result_1 <- results(data_work_dds, contrast = c("condition", "diff_KD", "diff_control"))
+## --- Comment --- ##
+# comparison condition should be diff_KD vs diff_control ->>> done
+
+result_2 <- results(data_work_dds, name ="condition_conf100_KD_vs_conf100_control")
+summary(result_1)
+summary(result_2)
+```
+
+```{r}
+#shrunken log2 fold changes, LFC estimates
+result_1_LFC <- lfcShrink(data_work_dds, contrast = c("condition", "diff_KD", "diff_control"), type="ashr")
+#can't be applied shrinkage on filtered data, it is not deseq object 
+
+## --- Comment --- ##
+# comparison condition should be diff_KD vs diff_control 
+# cannot use `coef` here. Need to use `contrast` to specify the conditions. ->> done
+#(done)
+
+
+result_2_LFC <- lfcShrink(data_work_dds, coef="condition_conf100_KD_vs_conf100_control", type="apeglm")
+```
+
+```{r}
+#after shrinkage before plotting, I apply filtering because the format needs to be in dataframe 
+#metric for reliability of fold changes. Filter based on BaseMean. filter the DEGs based on the requirement that baseMean > 50
+#needs to be converted to dataframe
+df_result_1_LFC <- as.data.frame(result_1_LFC)
+df_result_2_LFC <- as.data.frame(result_2_LFC)
+
+result_1_LFC_filtered <- df_result_1_LFC %>% dplyr::filter(baseMean > 50)
+result_2_LFC_filtered <- df_result_2_LFC %>% dplyr::filter(baseMean > 50)
+```
+
+
+# MA-plot
+```{r}
+#MA-plot visualising differential expression results
+#In DESeq2, the function plotMA shows the log2 fold changes attributable to a given variable over the mean of normalized counts for all the samples in the DESeqDataSet. Points will be colored blue if the adjusted p value is less than 0.1
+
+plot_result_1_LFC_filtered <- plotMA(result_1_LFC_filtered,
+                            main= "MA-plot of diff_KD vs diff_control with shrunken log2 fold changes",
+                            ylim=c(-2,2))
+abline(h=c(-1,1), col="dodgerblue", lwd=2)
+plot_result_2_LFC_filtered <- plotMA(result_2_LFC_filtered,
+                            main= "MA-plot of KD vs control (%100 confluent) with shrunken log2 fold changes",
+                            ylim=c(-2,2))
+abline(h=c(-1,1), col="dodgerblue", lwd=2)
+
+## --- Comment --- ##
+# the default MA plot from DESeq2 doesn't look that good. Can you try the MA plot from ggpubr package?
+# https://rpkgs.datanovia.com/ggpubr/reference/ggmaplot.html
+# Also, you can practice labeling the top 10 genes for both positive and negative fold change.
+#(done)
+
+MAplot_result_1_LFC <- ggmaplot(result_1_LFC_filtered, main = "MA plot of diff_KD vs diff_control", 
+                              fdr = 0.05, #false discovery rate)
+                              fc = 1,
+                              alpha = 0.5,
+                              seed = 42,
+                              genenames = as.vector(result_1_LFC_filtered_geneid$external_gene_name), 
+                              size = 0.4,
+                              palette = c("#B31B21", "#1465AC", "darkgray"),
+                              font.label = c("bold", 11), label.rectangle = TRUE,
+                              font.legend = "bold",
+                              select.top.method = c("padj", "fc"),
+                              font.main = "bold",
+                              legend = "top", top = 50,
+                              ggtheme = ggplot2::theme_minimal()) +
+  scale_y_continuous(breaks = seq(-4, 4, by = 2),  # Custom breaks:
+                     limits = c(-4, 4))  # Set y-axis range from -10 to 10
+
+MAplot_result_1_LFC
+
+#######
+
+MAplot_result_2_LFC <- ggmaplot(result_2_LFC_filtered, main = expression("MA plot of conf100_KD vs conf100_control"), 
+                              fdr = 0.05, #false discovery rate)
+                              fc = 1,
+                              alpha = 0.5,
+                              seed = 42,
+                              genenames = as.vector(result_2_LFC_filtered_geneid$external_gene_name), 
+                              size = 0.4,
+                              palette = c("#B31B21", "#1465AC", "darkgray"),
+                              font.label = c("bold", 11), label.rectangle = TRUE,
+                              font.legend = "bold",
+                              font.main = "bold",
+                              legend = "top", top = 10,
+                              select.top.method = c("padj", "fc"),
+                              ggtheme = ggplot2::theme_minimal()) # Set y-axis range from -10 to 10
+
+
+MAplot_result_2_LFC
+
+#print and save
+ggsave(MAplot_result_1_LFC, 
+       filename = "MAplot_result_1_diff_KD_vs_diff_control.pdf",
+       device = "pdf",
+       height = 10, width = 10, units = "in")
+
+ggsave(MAplot_result_2_LFC, 
+       filename = "MAplot_result_2_conf100_KD_vs_conf100_control.pdf",
+       device = "pdf",
+       height = 8, width = 8, units = "in")
+```
+
+```{r}
+#remove version id from ensembl ids
+rownames(result_1_LFC_filtered) <- gsub("(ENSG[0-9]+)\\.[0-9]+", "\\1", rownames(result_1_LFC_filtered))
+rownames(result_2_LFC_filtered) <- gsub("(ENSG[0-9]+)\\.[0-9]+", "\\1", rownames(result_2_LFC_filtered))
+```
+
+#getting gene IDs of data frame result deseq table
+```{r}
+library(biomaRt)
+ensembl <- useEnsembl(biomart = "genes")
+datasets <- listDatasets(ensembl)
+ensembl <- useDataset(dataset = "hsapiens_gene_ensembl", mart = ensembl)
+searchDatasets(mart = ensembl, pattern = 'hsapiens')
+#version 112 https://may2024.archive.ensembl.org
+
+## --- Comment --- ##
+# Please use version 110 (equivalent to Gencode 44) for annotation. ->>>> done 
+# Also, good practice to include gene_biotype column so that genes can be identified as protein_coding, lncRNA etc. ->>>> done 
+ensembl <- useEnsembl(biomart= "genes", dataset="hsapiens_gene_ensembl", version = 110)
+attr <- listAttributes(ensembl)
+result_1_LFC_filtered_geneid <- getBM(mart = ensembl, 
+                                attributes = c("ensembl_gene_id", "external_gene_name", "gene_biotype"), 
+                                filters = "ensembl_gene_id", 
+                                values = rownames(result_1_LFC_filtered))
+
+result_2_LFC_filtered_geneid <- getBM(mart = ensembl, 
+                                attributes = c("ensembl_gene_id", "external_gene_name", "gene_biotype"), 
+                                filters = "ensembl_gene_id", 
+                                values = rownames(result_2_LFC_filtered))
+
+```
+```{r}
+#method2 adding gene names as a column
+ls("package:org.Hs.eg.db")
+result_1_LFC_filtered$symbol <- mapIds(org.Hs.eg.db, keys = rownames(result_1_LFC_filtered), keytype = "ENSEMBL", column = "SYMBOL")
+result_2_LFC_filtered$symbol <- mapIds(org.Hs.eg.db, keys = rownames(result_2_LFC_filtered), keytype = "ENSEMBL", column = "SYMBOL")
+
+result_1_LFC_filtered$gene_biotype <- mapIds(org.Hs.eg.db, keys = rownames(result_1_LFC_filtered), keytype = "ENSEMBL", column = "GENETYPE")
+result_2_LFC_filtered$gene_biotype <- mapIds(org.Hs.eg.db, keys = rownames(result_2_LFC_filtered), keytype = "ENSEMBL", column = "GENETYPE")
+```
+
+
+#Volcano plot
+```{r}
+
+#theme for ggplot
+theme_set(theme_classic(base_size = 20) +
+            theme(
+              axis.title.y = element_text(face = "bold", margin = margin(0,20,0,0), size = rel(1.1), color = 'black'),
+              axis.title.x = element_text(hjust = 0.5, face = "bold", margin = margin(20,0,0,0), size = rel(1.1), color = 'black'),
+              plot.title = element_text(hjust = 0.5)
+            ))
+
+#label the genes for 1. condition_diff_KD_vs_diff_control
+result_1_LFC_filtered$differently_expressed <- "NO"
+result_1_LFC_filtered$differently_expressed[result_1_LFC_filtered$log2FoldChange > 0.1 & result_1_LFC_filtered$padj < 0.05] <- "UP"
+result_1_LFC_filtered$differently_expressed[result_1_LFC_filtered$log2FoldChange < 0.1 & result_1_LFC_filtered$padj < 0.05] <- "DOWN"
+result_1_LFC_filtered$delabel <- NA
+
+top30_DEG_result1 <- head(result_1_LFC_filtered[order(result_1_LFC_filtered$pvalue), 'symbol'], 30)
+result_1_LFC_filtered$delabel <- ifelse(result_1_LFC_filtered$symbol %in% top30_DEG_result1, result_1_LFC_filtered$symbol, NA)
+
+#getting volcano plot table 1. (condition_diff_KD vs diff_control)
+result_1_volcanoplot <- ggplot(data = result_1_LFC_filtered, aes(x=log2FoldChange, y=-log10(pvalue), col=differently_expressed, label=delabel)) +
+  geom_vline(xintercept = c(-0.1, 0.1), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') +
+  geom_point(size = 2) + 
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"), # to set the colours of our variable
+                     labels = c("Downregulated", "Not significant", "Upregulated")) + #to set the labels in case we want to overwrite the categories from the dataframe(UP, DOWN, NO)
+  coord_cartesian(ylim = c(0, 300), xlim = c(-10, 10)) + 
+  scale_x_continuous(breaks = seq(-10, 10, 2)) + #to customise the breaks in the x axis
+  labs(color = 'Genes', #legend_title, 
+       x = expression("log"[2]*"FC"), y = expression("-log"[10]*"p-value")) + 
+  theme_minimal() +
+  geom_text_repel(max.overlaps = Inf) +
+  theme(text=element_text(size=15)) +
+  ggtitle('DEGs Analysis of differentiated TNXB-KD vs control Adipocytes')
+
+result_1_volcanoplot
+
+####################################################################################################
+
+#label the genes for 2. condition_conf100_KD_vs_conf100_control
+result_2_LFC_filtered$differently_expressed <- "NO"
+result_2_LFC_filtered$differently_expressed[result_2_LFC_filtered$log2FoldChange > 0.1 & result_2_LFC_filtered$padj < 0.05] <- "UP"
+result_2_LFC_filtered$differently_expressed[result_2_LFC_filtered$log2FoldChange < 0.1 & result_2_LFC_filtered$padj < 0.05] <- "DOWN"
+result_2_LFC_filtered$delabel <- NA
+
+top30_DEG_result2 <- head(result_2_LFC_filtered[order(result_2_LFC_filtered$pvalue), 'symbol'], 30)
+result_2_LFC_filtered$delabel <- ifelse(result_2_LFC_filtered$symbol %in% top30_DEG_result2, result_2_LFC_filtered$symbol, NA)
+
+#getting volcano plot table 2. (condition_conf100_KD_vs_conf100_control)
+result_2_volcanoplot <- ggplot(data = result_2_LFC_filtered, aes(x=log2FoldChange, y=-log10(pvalue), col=differently_expressed, label=delabel)) +
+  geom_vline(xintercept = c(-0.1, 0.1), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') +
+  geom_point(size = 2) + 
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00"), # to set the colours of our variable
+                     labels = c("Downregulated", "Not significant", "Upregulated")) + #to set the labels in case we want to overwrite the categories from the dataframe(UP, DOWN, NO)
+  coord_cartesian(ylim = c(0, 300), xlim = c(-10, 10)) + # since some genes can have minuslog10padj of inf, we set these limits
+  scale_x_continuous(breaks = seq(-10, 10, 2)) + # to customise the breaks in the x axis
+  labs(color = 'Genes', #legend_title, 
+       x = expression("log"[2]*"FC"), y = expression("-log"[10]*"p-value")) + 
+  theme_minimal() +
+  geom_text_repel(max.overlaps = Inf) +
+  theme(text=element_text(size=15)) +
+  ggtitle('DEGs Analysis of TNXB-KD vs control in 100%-confluent Adipocytes')
+
+result_2_volcanoplot
+
+#print and save
+ggsave(result_1_volcanoplot, 
+       filename = "result_1_volcanoplot.pdf",
+       device = "pdf",
+       height = 12, width = 10, units = "in")
+
+ggsave(result_2_volcanoplot, 
+       filename = "result_2_volcanoplot.pdf",
+       device = "pdf",
+       height = 12, width = 10, units = "in")
+```
+
+```{r}
+#Enhanced Volcano function
+#Blighe, Rana, and Lewis 2018
+
+if (!requireNamespace('BiocManager', quietly = TRUE))
+    install.packages('BiocManager')
+
+BiocManager::install('EnhancedVolcano')
+
+devtools::install_github('kevinblighe/EnhancedVolcano')
+
+library(EnhancedVolcano)
+
+
+## --- Comment --- ##
+# EnhancedVolcano has an option to manually set labels for specific genes. You can label the top 10 genes for each direction of log fold change. ->>> done.
+
+#getting top10 after filtering for diff 
+top10_DEG_result1 <- head(result_1_LFC_filtered[order(result_1_LFC_filtered$pvalue), 'symbol'], 10)
+top10_DEG_result2 <- head(result_2_LFC_filtered[order(result_2_LFC_filtered$pvalue), 'symbol'], 10)
+
+volcanoplot_result_1_LFC_v2 <- EnhancedVolcano(result_1_LFC_filtered,
+                lab = result_1_LFC_filtered$symbol,
+                x = "log2FoldChange",
+                y = "pvalue",
+                selectLab = c("PTX3", "CLDN11", "SERPINE1", "CRIM1", "CCND1", "CCN1", "CCN2", "TAGLN", "PTGS1", "THBS1"),
+                title = "DEGs of TNXB-KD vs Control in Differentiated Adipocytes",
+                pCutoff = 5e-2,
+                FCcutoff = 1,
+                cutoffLineType = "twodash",
+                cutoffLineWidth = 0.8,
+                legendLabels = c("Not sig.", "Log (base 2) FC", "p-value", "p-value & Log (base 2) FC"),
+                legendPosition = "right",
+                legendLabSize = 16,
+                boxedLabels = TRUE,
+                legendIconSize = 5.0,
+                drawConnectors = TRUE,
+                widthConnectors = 1.0,
+                colConnectors = "black",
+                pointSize = 3.0,
+                labSize = 6.0,
+                subtitle = NULL)
+
+volcanoplot_result_1_LFC_v2
+
+###################################
+
+volcanoplot_result_2_LFC_v2 <- EnhancedVolcano(result_2_LFC_filtered,
+                lab = result_2_LFC_filtered$symbol,
+                x = "log2FoldChange",
+                y = "pvalue",
+                title = "DEGs of TNXB-KD vs Control in 100%-confluent Adipocytes",
+                selectLab = c("MYH9", "SEMA7A", "HSPA8", "TGFBR2", "RCAN1", "ENPP2", "P4HA2", "P4HA1", "TUBB4B", "PHLDA1"),
+                pCutoff = 5e-2,
+                FCcutoff = 1,
+                cutoffLineType = "twodash",
+                cutoffLineWidth = 0.8,
+                legendLabels = c("Not sig.", "Log (base 2) FC", "p-value", "p-value & Log (base 2) FC"),
+                legendPosition = "right",
+                boxedLabels = TRUE,
+                legendLabSize = 16,
+                legendIconSize = 5.0,
+                drawConnectors = TRUE,
+                widthConnectors = 1.0,
+                colConnectors = "black",
+                pointSize = 3.0,
+                labSize = 6.0,
+                subtitle = NULL)
+
+volcanoplot_result_2_LFC_v2
+
+#print and save
+ggsave(volcanoplot_result_1_LFC_v2, 
+       filename = "volcanoplot_result_1_LFC_v2.pdf",
+       device = "pdf",
+       height = 10, width = 15, units = "in")
+
+ggsave(volcanoplot_result_2_LFC_v2, 
+       filename = "volcanoplot_result_2_LFC_v2.pdf",
+       device = "pdf",
+       height = 12, width = 12, units = "in")
+```
+
+
+
+#Plot PCA
+```{r}
+#comment
+#Use top 1000 genes variable genes -> done  
+#raw counts from data_work_dds
+counts_data <- counts(data_work_dds)
+
+# variance of each gene across samples
+gene_variances <- apply(counts_data, 1, var)
+
+#Select the top 1000 most variable genes
+top_1000_genes <- order(gene_variances, decreasing = TRUE)[1:1000]
+
+#Subset data_work_dds to keep only the top 1000 most variable genes
+filtered_data_work_dds <- data_work_dds[top_1000_genes, ]
+
+#variance stabilizing transformation 
+pca_data_work_dds <- vst(filtered_data_work_dds, blind=FALSE)
+plotpca_data_work_dds <- plotPCA(pca_data_work_dds, intgroup=c("condition", "donor"), returnData = TRUE)
+plotpca_data_work_dds
+
+percentVar <- round(100 * attr(plotpca_data_work_dds, "percentVar"))
+
+## --- Comment --- ##
+# Modify the plot to assign shape to the "donor" column in coldata. ->>> done
+# Modify the PCA plot ->> done
+
+PCA_plot_of_RNA_seq_data <- ggplot(plotpca_data_work_dds, aes(x = PC1, y = PC2, color = condition, shape = donor)) +
+  geom_point(size = 5, stroke = 2, fill = NA, alpha = 0.6) + #alpha to set transperancy
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +  #draw line at origin (0,0)
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(title = "PCA Plot") +
+  labs(color = "KD condition", shape = "Donor") +
+  scale_color_manual(values = c("orange", "lightblue", "purple", "darkgreen", "turquoise", "yellow4"),
+                     labels = c("conf100_control", "conf100_KD", "conf50_control", "conf50_KD", "diff_control", "diff_KD")) +
+  scale_shape_manual(values = c(15, 16, 17)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),  # Center title and adjust size
+    axis.title = element_text(size = 12, face = "bold"),  # Axis labels size
+    legend.title = element_text(size = 11, face = "bold"),  # Legend title bold
+    legend.text = element_text(size = 10),  # Legend text size
+    panel.background = element_rect(fill = "white"),  # Set background to white
+    plot.background = element_rect(fill = "white"),   # Set plot background to white
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    axis.line = element_line(colour = "black")  # Add a black border around the axes
+  )
+
+PCA_plot_of_RNA_seq_data
+
+ggsave(PCA_plot_of_RNA_seq_data, 
+       filename = "PCA_plot_of_RNA_seq_data.pdf",
+       device = "pdf",
+       height = 6, width = 7, units = "in")
+```
+
+```{r}
+
+#SummarizedExperiment
+library(DESeq2)
+library(SummarizedExperiment)
+
+#take the dds object and subset it by cell state i.e. keep only the samples corresponding to diff_KD & diff_control, do it for the other two cell states (50% confluence and 100% confluence).Compare the 3 PCA plots
+
+#Subset for "diff_control" and "diff_KD"
+dds_diff <- colData(data_work_dds)$condition %in% c("diff_control", "diff_KD")
+dds_diff_subset <- data_work_dds[, dds_diff]
+rld <- rlog(dds_diff_subset)
+pcaplot_dds_diff_subseted <- plotPCA(rld, intgroup = c("condition", "donor"))
+pcaplot_dds_diff_subseted
+
+
+#subset for 50% confluence (conf50_control and conf50_KD)
+dds_conf50 <- colData(data_work_dds)$condition %in% c("conf50_control", "conf50_KD")
+dds_conf50_subset <- data_work_dds[, dds_conf50]
+rld_2 <- rlog(dds_conf50_subset)
+pcaplot_dds_conf50_subseted <- plotPCA(rld_2, intgroup = c("condition", "donor"))
+pcaplot_dds_conf50_subseted
+
+#subset for 100% confluence (conf100_control and conf100_KD)
+dds_conf100 <- colData(data_work_dds)$condition %in% c("conf100_control", "conf100_KD")
+dds_conf100_subset <- data_work_dds[, dds_conf100]
+rld_3 <- rlog(dds_conf100_subset)
+pcaplot_dds_conf100_subseted <- plotPCA(rld_3, intgroup = c("condition", "donor"))
+pcaplot_dds_conf100_subseted
+
+#PC1 in conf100 explains 86% of the variance, it indicates that a very large portion of the variability in your data is captured by this single principal component. This suggests that the samples are strongly separated along the axis of PC1 based on the underlying differences in their gene expression patterns.
+
+```
+
+
+#Table of differentially expressed genes 
+```{r}
+df_result_1 <- as.data.frame(result_1_LFC_filtered)
+df_result_2 <- as.data.frame(result_2_LFC_filtered)
+
+## --- Comment --- ##
+# It will be easier for others to read the DEG results file if you can filter the data to keep only differentially expressed genes with p.adj cutoff of 0.05
+
+#filtering DEG p.adj cutoff 0.05 (Used baseMean > 50 filtered data from above)
+filtered_DEG_result_1 <- df_result_1[!is.na(df_result_1$padj) & df_result_1$padj < 0.05,]
+filtered_DEG_result_2 <- df_result_2[!is.na(df_result_2$padj) & df_result_2$padj < 0.05,]
+
+write.csv(filtered_DEG_result_1, file = "DEGs_in_condition_diff_KD_vs_diff_control.csv", row.names = TRUE)
+write.csv(filtered_DEG_result_2, file = "DEGs_in_condition_conf100_KD_vs_conf100_control.csv", row.names = TRUE)
+
+
+write.table(filtered_DEG_result_1, file = "DEGs_in_condition_diff_KD_vs_diff_control.txt", row.names = TRUE)
+write.table(filtered_DEG_result_2, file = "DEGs_in_condition_conf100_KD_vs_conf100_control.txt", row.names = TRUE)
+```
+
